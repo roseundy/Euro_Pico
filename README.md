@@ -1,1 +1,1 @@
-Repository for my Raspberry Pi based Eurorack module code
+Repository for my Raspberry Pi Pico based Eurorack module code
