@@ -235,6 +235,16 @@ int maxGroupLength(int g) {
     return total;
 }
 
+int totalGroupWeight(int g) {
+    int total = 0;
+    for (int i=0; i<MAX_BANKS_IN_GROUP; i++) {
+        if (sequencerState.group[g].bank_list[i] < 0)
+            break;
+        total += sequencerState.bank[sequencerState.group[g].bank_list[i]].weight;
+    }
+    return total;
+}
+ 
 // update "RUN" and slot LEDs based on current state
 
 int led_time = 0;
@@ -417,6 +427,60 @@ void groupNormalOutput(int g, absolute_time_t now)
             lidx = 0;
             bidx = sequencerState.group[g].bank_list[0];
         }
+        if (sequencerState.bank[bidx].relative_time || (sequencerState.bank[bidx].slot[sidx].duration > 0)) {
+            dac_buf[g] = sequencerState.bank[bidx].slot[sidx].note;
+            tempState.current_group_ptr[g].note = sequencerState.bank[bidx].slot[sidx].note;
+        }
+
+        if (!sequencerState.bank[bidx].slot[sidx].mute && !sequencerState.group[g].mute)
+        {
+            triggerGate(g, now, sequencerState.bank[bidx].relative_time, sequencerState.bank[bidx].slot[sidx].duration);
+        }
+    }
+    else
+    {
+        // group is disabled
+        dac_buf[g] = 0;
+        gpio_put(GATEA + g, 0);
+    }
+}
+
+void groupRandomBankOutput(int g, absolute_time_t now)
+{
+    if ((sequencerState.group[g].bank_list[0] != -1) && (sequencerState.group[g].length != 0))
+    {
+        int &bidx = tempState.current_group_ptr[g].bank_idx;
+        int &sidx = tempState.current_group_ptr[g].slot_idx;
+        int &lidx = tempState.current_group_ptr[g].list_idx;
+        int &count = tempState.current_group_ptr[g].note_count;
+
+        sidx++;
+        count = 0; // not used in this mode
+
+        if ((sidx > 16) || (sidx >= sequencerState.bank[bidx].length))
+        {
+            sidx = 0;
+            if ((get_rand_32() % 100) < sequencerState.group[g].random_bank_percent) {
+                // New bank randomly chosen from list
+                int total_weight = totalGroupWeight(g);
+                uint32_t r = get_rand_32() % total_weight;
+                int running_weight = 0;
+                for (int i = 0; i < MAX_BANKS_IN_GROUP; i++) {
+                    if (sequencerState.group[g].bank_list[i] < 0) {
+                        // should never get here
+                        lidx = 0;
+                        break;
+                    }
+                    running_weight += sequencerState.bank[sequencerState.group[g].bank_list[i]].weight;
+                    if (r < running_weight) {
+                        lidx = i;
+                        break;
+                    }
+                }
+                bidx = sequencerState.group[g].bank_list[lidx];
+            }
+        }
+
         if (sequencerState.bank[bidx].relative_time || (sequencerState.bank[bidx].slot[sidx].duration > 0)) {
             dac_buf[g] = sequencerState.bank[bidx].slot[sidx].note;
             tempState.current_group_ptr[g].note = sequencerState.bank[bidx].slot[sidx].note;
@@ -696,6 +760,9 @@ void updateGroups(bool clock)
                     case GM_RANDOM_SLOT:
                         groupRandomSlotOutput(g, now);
                         break;
+                    case GM_RANDOM_BANK:
+                        groupRandomBankOutput(g, now);
+                        break;
                     case GM_TURING:
                         groupTuringOutput(g, now);
                         break;
@@ -929,6 +996,7 @@ void factoryInitState() {
         sequencerState.bank[b].length = 8;
         sequencerState.bank[b].relative_time = true;
         sequencerState.bank[b].default_duration = 0;
+        sequencerState.bank[b].weight = 1;
 
         for (int s=0; s<16; s++) {
             // init slot
@@ -952,6 +1020,7 @@ void factoryInitState() {
         sequencerState.group[g].random_upper = 0xffff;
         sequencerState.group[g].random_qmode = QUANT_CHROMATIC;
         sequencerState.group[g].random_qkey = 0;
+        sequencerState.group[g].random_bank_percent = 100;
         sequencerState.group[g].turing_size = 8;
         sequencerState.group[g].turing_pulse = GRP_PULSE_OFF;
         sequencerState.group[g].turing_hammer_on = false;
@@ -1156,6 +1225,10 @@ void getControls() {
                                     editDecDigits(sequencerState.bank[tempState.active_bank].default_duration, false, tempState.digit_pos);
                                 }
                                 break;
+                            case BANK_WEIGHT_EDIT:
+                                if (sequencerState.bank[tempState.active_bank].weight > 1)
+                                    sequencerState.bank[tempState.active_bank].weight--;
+                                break;
                         }
                         break;
 
@@ -1208,6 +1281,10 @@ void getControls() {
                             case GROUP_BANK_LIST:
                                 if (tempState.digit_pos > 0)
                                     tempState.digit_pos--;
+                                break;
+                            case GROUP_RANDOM_BANK_PERCENT:
+                                if (sequencerState.group[tempState.active_group].random_bank_percent > 1)
+                                    sequencerState.group[tempState.active_group].random_bank_percent--;
                                 break;
                             case GROUP_DIVIDER:
                                 if (sequencerState.group[tempState.active_group].divide > 1)
@@ -1306,6 +1383,10 @@ void getControls() {
                                     editDecDigits(sequencerState.bank[tempState.active_bank].default_duration, true, tempState.digit_pos);
                                 }
                                 break;
+                            case BANK_WEIGHT_EDIT:
+                                if (sequencerState.bank[tempState.active_bank].weight < 99)
+                                    sequencerState.bank[tempState.active_bank].weight++;
+                                break;
                         }
                         break;
 
@@ -1358,6 +1439,10 @@ void getControls() {
                             case GROUP_BANK_LIST:
                                 if (tempState.digit_pos < numBanks(sequencerState.group[tempState.active_group].bank_list))
                                     tempState.digit_pos++;
+                                break;
+                            case GROUP_RANDOM_BANK_PERCENT:
+                                if (sequencerState.group[tempState.active_group].random_bank_percent < 100)
+                                    sequencerState.group[tempState.active_group].random_bank_percent++;
                                 break;
                             case GROUP_DIVIDER:
                                 if (sequencerState.group[tempState.active_group].divide < 99)
@@ -1529,6 +1614,9 @@ void getControls() {
                                 tempState.sub_mode = BANK_DEFAULT_DURATION_EDIT;
                                 break;
                             case BANK_DEFAULT_DURATION_EDIT:
+                                tempState.sub_mode = BANK_WEIGHT_EDIT;
+                                break;
+                            case BANK_WEIGHT_EDIT:
                                 tempState.sub_mode = BANK_LENGTH_EDIT;
                                 break;
                         }
@@ -1550,6 +1638,9 @@ void getControls() {
                                     case GM_RANDOM_SLOT:
                                         tempState.sub_mode = GROUP_LENGTH_EDIT;
                                         break;
+                                    case GM_RANDOM_BANK:
+                                        tempState.sub_mode = GROUP_RANDOM_BANK_PERCENT;
+                                        break;
                                     case GM_TURING:
                                     case GM_TURING_SLOT:
                                         tempState.sub_mode = GROUP_TURING_SIZE;
@@ -1560,6 +1651,9 @@ void getControls() {
                                 }
                                 break;
                             case GROUP_LENGTH_EDIT:
+                                tempState.sub_mode = GROUP_BANK_LIST;
+                                break;
+                            case GROUP_RANDOM_BANK_PERCENT:
                                 tempState.sub_mode = GROUP_BANK_LIST;
                                 break;
                             case GROUP_BANK_LIST:
@@ -1891,6 +1985,13 @@ void showBank(SSD1306 &display) {
             drawText(&display, font_8x8, "Default duration", 0, 10, WriteMode::ADD);
             showDuration(display, sequencerState.bank[tempState.active_bank].default_duration, 35);
             break;
+                    
+        case BANK_WEIGHT_EDIT:
+            drawText(&display, font_8x8, "Random weight", 0, 10, WriteMode::ADD);
+            sprintf(sbuf, "%2.2d", sequencerState.bank[tempState.active_bank].weight);
+            drawText(&display, font_12x16, sbuf, 0, 25, WriteMode::ADD);
+            drawLine(&display, 0, 25+16, 2*12-1, 25+16);
+            break;
     }
 
 }
@@ -2005,6 +2106,13 @@ void showGroupEdit(SSD1306 &display)
             drawText(&display, font_8x8, sbuf, 0, 56, WriteMode::ADD);
             break;
 
+        case GROUP_RANDOM_BANK_PERCENT:
+            drawText(&display, font_8x8, "Bank Chg Pct", 0, 10, WriteMode::ADD);
+            sprintf(sbuf, "%3.3d%%", sequencerState.group[tempState.active_group].random_bank_percent);
+            drawText(&display, font_12x16, sbuf, 0, 25, WriteMode::ADD);
+            drawLine(&display, 0, 25+16, 3*12-1, 25+16);
+            break;
+
         case GROUP_BANK_LIST:
             drawText(&display, font_8x8, "Bank List", 0, 10, WriteMode::ADD);
             showBankList(display, sequencerState.group[tempState.active_group].bank_list, 22, tempState.digit_pos);
@@ -2086,6 +2194,7 @@ void showGroupView(SSD1306 &display)
 
     switch (sequencerState.group[g].mode) {
         case GM_SEQUENCED:
+        case GM_RANDOM_BANK:
             if ((sequencerState.group[g].bank_list[0] >= 0) && (sequencerState.group[g].length != 0)) {
                 sprintf(sbuf, "Bank %2d", tempState.current_group_ptr[g].bank_idx);
                 drawText(&display, font_12x16, sbuf, 0, 12, WriteMode::ADD);

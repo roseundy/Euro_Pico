@@ -135,6 +135,7 @@ enum SeqSubMode_t {
     BANK_LENGTH_EDIT,
     BANK_RELATIVE_TIME_EDIT,
     BANK_DEFAULT_DURATION_EDIT,
+    BANK_WEIGHT_EDIT,
     
     GROUP_MODE_EDIT,
     GROUP_LENGTH_EDIT,
@@ -146,6 +147,7 @@ enum SeqSubMode_t {
     GROUP_RANDOM_LOWER,
     GROUP_RANDOM_UPPER,
     GROUP_RANDOM_QUANT,
+    GROUP_RANDOM_BANK_PERCENT,
     GROUP_DIVIDER,
 };
 
@@ -175,10 +177,11 @@ enum GroupMode_t {
     GM_SEQUENCED,
     GM_RANDOM,
     GM_RANDOM_SLOT,
+    GM_RANDOM_BANK,
     GM_TURING,
     GM_TURING_SLOT,
 };
-const char *group_mode_names[] = {"Sequenced", "Random", "Random Slot", "Turing", "Turing Slot"};
+const char *group_mode_names[] = {"Sequenced", "Random", "Random Slot", "Random Bank", "Turing", "Turing Slot"};
 #define GM_FIRST GM_SEQUENCED
 #define GM_LAST GM_TURING_SLOT
 
@@ -209,6 +212,7 @@ struct BankData_t {
     bool relative_time;
     int length;
     uint16_t default_duration;
+    int weight;
 };
 
 struct GroupData_t {
@@ -222,6 +226,7 @@ struct GroupData_t {
     uint16_t random_upper;
     QuantMode_t random_qmode;
     int16_t random_qkey;
+    int16_t random_bank_percent;
     bool turing_state[16];
     int16_t turing_size;
     int16_t turing_pulse;
